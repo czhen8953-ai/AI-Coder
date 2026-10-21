@@ -3,7 +3,23 @@ import requests
 import json
 import re # 用于文本处理
 
-st.set_page_config(page_title="青年与哲人", page_icon="🧘‍♂️")
+# 1. 页面基本配置
+st.set_page_config(
+    page_title="青年与哲人", 
+    page_icon="🧘‍♂️", 
+    layout="wide",  # 🌟 关键：开启宽屏模式，让聊天框变宽
+    initial_sidebar_state="expanded"
+)
+
+# 2. 隐藏 Streamlit 默认的顶部菜单栏（让它看起来像一个独立App）
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
 st.title("🧘‍♂️ 青年与哲人：阿德勒心理对话室")
 
 # --- 核心升级：文本切片与检索 ---
@@ -49,18 +65,33 @@ def retrieve_relevant_context(query, chunks, top_k=2):
     best_context = "\n---\n".join([chunk for score, chunk in scored_chunks[:top_k]])
     return best_context
 
+# ==========================================
+# 🌟 侧边栏 UI
+# ==========================================
+with st.sidebar:
+    st.image("https://img.icons8.com/color/96/000000/brain--v2.png", width=80) # 随便找了一个网上的大脑图标
+    st.header("关于哲人")
+    st.info("我是一个基于阿德勒心理学《被讨厌的勇气》打造的数字对话者。我不是来给你答案的，我是来向你提问的。")
+    
+    st.divider() # 加一条分割线
+    
+    if st.button("🗑️ 清空聊天记录", use_container_width=True):
+        st.session_state.messages = [] # 清空记忆
+        st.rerun() # 重新加载页面
+
 # --- 以下逻辑和之前类似，但加入了检索 ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
     if msg["role"] != "system":
-        with st.chat_message(msg["role"]):
+        # 如果是用户，显示 🙋‍♂️；如果是 AI，显示 🧘‍♂️
+        avatar = "🙋‍♂️" if msg["role"] == "user" else "🧘‍♂️"
+        with st.chat_message(msg["role"], avatar=avatar):
             st.write(msg["content"])
-
 if user_input := st.chat_input("青年，你在为什么烦恼？"):
     
-    with st.chat_message("user"):
+    with st.chat_message("user",avatar="🙋‍♂️"):
         st.write(user_input)
     
     # 💡 核心：在发给 AI 之前，先去书里只找相关的部分！
@@ -88,7 +119,7 @@ if user_input := st.chat_input("青年，你在为什么烦恼？"):
         "stream": True
     }
     
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="🧘‍♂️"):
         def generate_reply():
             response = requests.post(url, headers=headers, json=data, stream=True)
             if response.status_code == 200:
