@@ -1,4 +1,4 @@
 streamlit
 requests
-jieba
-scikit-learn
+sentence-transformers
+numpy

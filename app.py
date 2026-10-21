@@ -6,29 +6,36 @@ import jieba
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-# 检索函数升级版：使用 TF-IDF 算法计算语义相似度
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+# 加载轻量级的中文向量模型（专门处理中文语义）
+# 这里用的是智源研究院开源的 bge-small-zh 模型，非常适合新手电脑跑
+@st.cache_resource # 缓存模型，避免每次对话都重新加载，否则会卡死
+def load_model():
+    return SentenceTransformer('BAAI/bge-small-zh-v1.5')
+
+model = load_model()
+
 def retrieve_relevant_context(query, chunks, top_k=2):
-    # 1. 使用 jieba 对用户的问题进行中文分词（把句子切成词语）
-    query_words = " ".join(jieba.cut(query))
+    if not chunks:
+        return ""
+        
+    # 1. 把用户的问题变成向量坐标
+    query_embedding = model.encode([query])
     
-    # 2. 把所有的书块也用 jieba 分词
-    chunk_words = [" ".join(jieba.cut(chunk)) for chunk in chunks]
+    # 2. 把书里的所有切块也变成向量坐标
+    chunk_embeddings = model.encode(chunks)
     
-    # 3. 把所有分词后的文本送入向量化引擎
-    vectorizer = TfidfVectorizer()
-    # 把书块和用户的问题放在一起计算（fit_transform）
-    tfidf_matrix = vectorizer.fit_transform(chunk_words + [query_words])
+    # 3. 计算余弦相似度（算夹角，越接近 1 越相似）
+    similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
     
-    # 4. 计算用户问题（最后一行）与所有书块（前面的行）的余弦相似度
-    # 也就是算它们在多维空间里的夹角，越接近1表示越相关
-    cosine_similarities = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1]).flatten()
+    # 4. 找出得分最高的前 top_k 个块
+    top_indices = np.argsort(similarities)[-top_k:][::-1]
     
-    # 5. 找出相似度最高的 top_k 个块的索引
-    import numpy as np
-    top_indices = np.argsort(cosine_similarities)[-top_k:][::-1] # 取最后 top_k 个，并倒序
-    
-    # 6. 把选出来的块拼起来
-    best_context = "\n---\n".join([chunks[i] for i in top_indices if cosine_similarities[i] > 0.01]) # 加个0.01的阈值过滤掉完全不相关的
+    # 5. 拼起来返回
+    best_context = "\n---\n".join([chunks[i] for i in top_indices if similarities[i] > 0.3])
     return best_context
 import json
 import re # 用于文本处理
