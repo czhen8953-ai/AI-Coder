@@ -1,6 +1,36 @@
 import streamlit as st
 import requests
 import json
+import re
+import jieba
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+# 检索函数升级版：使用 TF-IDF 算法计算语义相似度
+def retrieve_relevant_context(query, chunks, top_k=2):
+    # 1. 使用 jieba 对用户的问题进行中文分词（把句子切成词语）
+    query_words = " ".join(jieba.cut(query))
+    
+    # 2. 把所有的书块也用 jieba 分词
+    chunk_words = [" ".join(jieba.cut(chunk)) for chunk in chunks]
+    
+    # 3. 把所有分词后的文本送入向量化引擎
+    vectorizer = TfidfVectorizer()
+    # 把书块和用户的问题放在一起计算（fit_transform）
+    tfidf_matrix = vectorizer.fit_transform(chunk_words + [query_words])
+    
+    # 4. 计算用户问题（最后一行）与所有书块（前面的行）的余弦相似度
+    # 也就是算它们在多维空间里的夹角，越接近1表示越相关
+    cosine_similarities = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1]).flatten()
+    
+    # 5. 找出相似度最高的 top_k 个块的索引
+    import numpy as np
+    top_indices = np.argsort(cosine_similarities)[-top_k:][::-1] # 取最后 top_k 个，并倒序
+    
+    # 6. 把选出来的块拼起来
+    best_context = "\n---\n".join([chunks[i] for i in top_indices if cosine_similarities[i] > 0.01]) # 加个0.01的阈值过滤掉完全不相关的
+    return best_context
+import json
 import re # 用于文本处理
 
 # 1. 页面基本配置
