@@ -1,54 +1,22 @@
 import streamlit as st
 import requests
 import json
-import re
-import jieba
+import os
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 
-# 加载轻量级的中文向量模型（专门处理中文语义）
-# 这里用的是智源研究院开源的 bge-small-zh 模型，非常适合新手电脑跑
-@st.cache_resource # 缓存模型，避免每次对话都重新加载，否则会卡死
-def load_model():
-    return SentenceTransformer('BAAI/bge-small-zh-v1.5')
-
-model = load_model()
-
-def retrieve_relevant_context(query, chunks, top_k=2):
-    if not chunks:
-        return ""
-        
-    # 1. 把用户的问题变成向量坐标
-    query_embedding = model.encode([query])
-    
-    # 2. 把书里的所有切块也变成向量坐标
-    chunk_embeddings = model.encode(chunks)
-    
-    # 3. 计算余弦相似度（算夹角，越接近 1 越相似）
-    similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
-    
-    # 4. 找出得分最高的前 top_k 个块
-    top_indices = np.argsort(similarities)[-top_k:][::-1]
-    
-    # 5. 拼起来返回
-    best_context = "\n---\n".join([chunks[i] for i in top_indices if similarities[i] > 0.3])
-    return best_context
-import json
-import re # 用于文本处理
-
+# ==========================================
 # 1. 页面基本配置
+# ==========================================
 st.set_page_config(
     page_title="青年与哲人", 
     page_icon="🧘‍♂️", 
-    layout="wide",  # 🌟 关键：开启宽屏模式，让聊天框变宽
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 2. 隐藏 Streamlit 默认的顶部菜单栏（让它看起来像一个独立App）
+# 隐藏 Streamlit 默认的顶部菜单栏
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -59,13 +27,20 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 st.title("🧘‍♂️ 青年与哲人：阿德勒心理对话室")
 
-# --- 核心升级：文本切片与检索 ---
+# ==========================================
+# 2. 核心逻辑：文本切片与向量检索
+# ==========================================
+@st.cache_resource # 缓存模型，避免每次对话都重新加载
+def load_model():
+    return SentenceTransformer('BAAI/bge-small-zh-v1.5')
+
+model = load_model()
+
 @st.cache_data
 def load_and_chunk_book(file_path, chunk_size=500):
     try:
         with open(file_path, "r", encoding="utf-8") as file:
             text = file.read()
-        # 把书按段落切开，然后每 500 个字拼成一个小块（Chunk）
         paragraphs = text.split('\n')
         chunks = []
         current_chunk = ""
@@ -82,59 +57,59 @@ def load_and_chunk_book(file_path, chunk_size=500):
     except FileNotFoundError:
         return ["书上空白一片。"]
 
-# 把整本书切成小碎块（比如切成了 200 块）
 book_chunks = load_and_chunk_book("book.txt")
 
-# 检索函数：当用户提问时，去 200 个碎块里找最相关的 2 块
 def retrieve_relevant_context(query, chunks, top_k=2):
-    # 极简版检索：把用户的问题拆成字，看哪个碎块包含的这些字最多
-    query_chars = set(query)
-    scored_chunks = []
-    for chunk in chunks:
-        # 算重合度
-        score = len(query_chars.intersection(set(chunk)))
-        scored_chunks.append((score, chunk))
-    
-    # 按分数从高到低排序，取前 top_k 个
-    scored_chunks.sort(key=lambda x: x[0], reverse=True)
-    
-    # 把选出来的碎块拼起来
-    best_context = "\n---\n".join([chunk for score, chunk in scored_chunks[:top_k]])
+    if not chunks:
+        return ""
+    # 1. 把用户的问题变成向量坐标
+    query_embedding = model.encode([query])
+    # 2. 把书里的所有切块也变成向量坐标
+    chunk_embeddings = model.encode(chunks)
+    # 3. 计算余弦相似度
+    similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
+    # 4. 找出得分最高的前 top_k 个块
+    top_indices = np.argsort(similarities)[-top_k:][::-1]
+    # 5. 拼起来返回
+    best_context = "\n---\n".join([chunks[i] for i in top_indices if similarities[i] > 0.3])
     return best_context
 
 # ==========================================
-# 🌟 侧边栏 UI
+# 3. 侧边栏 UI
 # ==========================================
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/000000/brain--v2.png", width=80) # 随便找了一个网上的大脑图标
+    st.image("https://img.icons8.com/color/96/000000/brain--v2.png", width=80)
     st.header("关于哲人")
     st.info("我是一个基于阿德勒心理学《被讨厌的勇气》打造的数字对话者。我不是来给你答案的，我是来向你提问的。")
-    
-    st.divider() # 加一条分割线
-    
+    st.divider()
     if st.button("🗑️ 清空聊天记录", use_container_width=True):
-        st.session_state.messages = [] # 清空记忆
-        st.rerun() # 重新加载页面
+        st.session_state.messages = []
+        st.rerun()
 
-# --- 以下逻辑和之前类似，但加入了检索 ---
+# ==========================================
+# 4. 聊天主循环
+# ==========================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# 渲染历史消息
 for msg in st.session_state.messages:
     if msg["role"] != "system":
-        # 如果是用户，显示 🙋‍♂️；如果是 AI，显示 🧘‍♂️
         avatar = "🙋‍♂️" if msg["role"] == "user" else "🧘‍♂️"
         with st.chat_message(msg["role"], avatar=avatar):
             st.write(msg["content"])
+
+# 接收用户输入
 if user_input := st.chat_input("青年，你在为什么烦恼？"):
     
-    with st.chat_message("user",avatar="🙋‍♂️"):
+    # 显示用户输入
+    with st.chat_message("user", avatar="🙋‍♂️"):
         st.write(user_input)
     
-    # 💡 核心：在发给 AI 之前，先去书里只找相关的部分！
+    # 检索相关书本内容
     relevant_book_text = retrieve_relevant_context(user_input, book_chunks)
     
-    # 动态生成系统提示词：这次不是塞整本书，只塞搜出来的段落
+    # 动态生成系统提示词
     system_prompt = f"""你是一位深谙阿德勒心理学的智者（哲人）。称呼用户为青年。
 你必须用苏格拉底式提问，绝对不要直接给答案。每次回复控制在200字以内。
 
@@ -142,20 +117,26 @@ if user_input := st.chat_input("青年，你在为什么烦恼？"):
 {relevant_book_text}
 """
 
-    # 把系统提示词和用户的话打包
+    # 打包发送给 API 的消息
     messages_to_send = [{"role": "system", "content": system_prompt}] + st.session_state.messages
     st.session_state.messages.append({"role": "user", "content": user_input})
     
-    api_key = st.secrets["DEEPSEEK_API_KEY"]
+    # 🔑 读取 API Key（兼容环境变量和 secrets）
+    api_key = os.getenv("DEEPSEEK_API_KEY") or st.secrets["DEEPSEEK_API_KEY"]
     url = "https://api.deepseek.com/chat/completions"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    
+    headers = {
+        "Content-Type": "application/json", 
+        "Authorization": f"Bearer {api_key}"
+    }
     
     data = {
         "model": "deepseek-chat",
-        "messages": messages_to_send, # 注意这里发的是精简过的消息
+        "messages": messages_to_send,
         "stream": True
     }
     
+    # 显示 AI 回复
     with st.chat_message("assistant", avatar="🧘‍♂️"):
         def generate_reply():
             response = requests.post(url, headers=headers, json=data, stream=True)
